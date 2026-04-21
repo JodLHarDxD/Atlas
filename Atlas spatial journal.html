@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Atlas — A Spatial Journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f3ede3;
+    --paper-deep: #ece4d6;
+    --ink: #0e1a2b;
+    --ink-soft: #2a3848;
+    --ember: #d8521e;
+    --sage: #6b8f71;
+    --mist: #a8b4bf;
+    --rule: rgba(14, 26, 43, 0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Fraunces', Georgia, serif;
+    font-optical-sizing: auto;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─────────── Paper grain overlay ─────────── */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.1 0 0 0 0 0.1 0 0 0 0 0.15 0 0 0 0.08 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
+  }
+
+  /* ─────────── WebGL canvas layer ─────────── */
+  #scene-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1;
+  }
+
+  /* ─────────── Fixed chrome ─────────── */
+  .chrome-top {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24px 40px;
+    z-index: 50;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+  }
+  .chrome-top > * { pointer-events: auto; }
+
+  .mark {
+    font-family: 'Fraunces', serif;
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .mark span { color: var(--ember); font-style: italic; }
+
+  .chrome-nav {
+    display: flex;
+    gap: 28px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .chrome-nav a { color: inherit; text-decoration: none; transition: color 0.2s; }
+  .chrome-nav a:hover { color: var(--ember); }
+
+  /* Progress rail */
+  .progress-rail {
+    position: fixed;
+    right: 32px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    z-index: 50;
+    mix-blend-mode: multiply;
+  }
+  .rail-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ink);
+    opacity: 0.25;
+    transition: opacity 0.3s, transform 0.3s;
+    position: relative;
+  }
+  .rail-dot.active { opacity: 1; transform: scale(1.4); background: var(--ember); }
+  .rail-dot::after {
+    content: attr(data-label);
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .rail-dot.active::after { opacity: 1; }
+
+  /* Scroll cue */
+  .scroll-cue {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    z-index: 50;
+    mix-blend-mode: multiply;
+    transition: opacity 0.4s;
+  }
+  .scroll-cue.hidden { opacity: 0; }
+  .scroll-cue::before {
+    content: "";
+    display: block;
+    width: 1px;
+    height: 28px;
+    background: var(--ink-soft);
+    margin: 0 auto 10px;
+    animation: cueDrop 1.8s ease-in-out infinite;
+    transform-origin: top;
+  }
+  @keyframes cueDrop {
+    0%, 100% { transform: scaleY(0.3); opacity: 0.3; }
+    50%      { transform: scaleY(1);   opacity: 1; }
+  }
+
+  /* ─────────── Scroll container ─────────── */
+  .scroll-track {
+    position: relative;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .scene {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    padding: 0 8vw;
+    position: relative;
+  }
+
+  .scene-inner {
+    max-width: 560px;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+  }
+  .scene.in-view .scene-inner { opacity: 1; transform: translateY(0); }
+
+  .scene--right { justify-content: flex-end; }
+  .scene--right .scene-inner { text-align: left; }
+
+  .scene--center {
+    justify-content: center;
+    text-align: center;
+  }
+  .scene--center .scene-inner { margin: 0 auto; text-align: center; }
+
+  .scene-index {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ember);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .scene-index::after {
+    content: "";
+    flex: 1;
+    max-width: 80px;
+    height: 1px;
+    background: var(--ember);
+    opacity: 0.4;
+  }
+  .scene--center .scene-index { justify-content: center; }
+  .scene--center .scene-index::after { display: none; }
+
+  .scene-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+  }
+
+  .scene-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: clamp(42px, 6.5vw, 88px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .scene-title em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--ember);
+  }
+
+  .scene-body {
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 480px;
+  }
+  .scene--center .scene-body { margin: 0 auto; }
+
+  .scene-meta {
+    margin-top: 32px;
+    display: flex;
+    gap: 28px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .scene--center .scene-meta { justify-content: center; }
+  .scene-meta > div { display: flex; flex-direction: column; gap: 4px; }
+  .scene-meta strong { color: var(--ink); font-weight: 500; }
+
+  /* Hero-specific */
+  .hero-kicker {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 24px;
+  }
+  .hero-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: clamp(56px, 10vw, 148px);
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+    color: var(--ink);
+  }
+  .hero-title em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--ember);
+    display: block;
+  }
+  .hero-sub {
+    margin-top: 28px;
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 440px;
+  }
+
+  /* Closing scene */
+  .colophon {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    margin-top: 36px;
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  /* Field annotations — the "hand-drawn cartography" flavor */
+  .annotation {
+    position: absolute;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .annotation::before {
+    content: "";
+    width: 40px;
+    height: 1px;
+    background: var(--ink-soft);
+    opacity: 0.5;
+  }
+  .annotation.left::before { order: 2; }
+  .annotation.left { flex-direction: row-reverse; }
+
+  @media (max-width: 768px) {
+    .chrome-top { padding: 20px; }
+    .chrome-nav { display: none; }
+    .progress-rail { right: 16px; }
+    .scene { padding: 0 6vw; }
+    .scene-title { font-size: 44px; }
+    .hero-title { font-size: 64px; }
+    .scene-meta { flex-wrap: wrap; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene-canvas"></canvas>
+
+<!-- fixed chrome -->
+<header class="chrome-top">
+  <div class="mark">Atlas<span>.</span></div>
+  <nav class="chrome-nav">
+    <a href="#">Index</a>
+    <a href="#">Field Notes</a>
+    <a href="#">Archive</a>
+    <a href="#">Contact</a>
+  </nav>
+</header>
+
+<div class="progress-rail" id="rail">
+  <div class="rail-dot" data-label="Overture"></div>
+  <div class="rail-dot" data-label="Workshop"></div>
+  <div class="rail-dot" data-label="Network"></div>
+  <div class="rail-dot" data-label="Gathering"></div>
+  <div class="rail-dot" data-label="Archive"></div>
+  <div class="rail-dot" data-label="Horizon"></div>
+</div>
+
+<div class="scroll-cue" id="cue">Scroll to begin</div>
+
+<!-- scroll track -->
+<main class="scroll-track">
+
+  <!-- Scene 0: Overture -->
+  <section class="scene scene--center" data-scene="0">
+    <div class="scene-inner">
+      <div class="hero-kicker">— A Spatial Journal, Vol. I</div>
+      <h1 class="hero-title">Between the lines<em>of every map.</em></h1>
+      <p class="hero-sub">A scroll-length study of terrain, tools, and the people who keep them moving. Six rooms, one continuous breath.</p>
+      <div class="scene-meta" style="margin-top:40px;">
+        <div><span>Issue</span><strong>№ 01 / Spring</strong></div>
+        <div><span>Duration</span><strong>6 Scenes</strong></div>
+        <div><span>Medium</span><strong>WebGL + Paper</strong></div>
+      </div>
+    </div>
+    <div class="annotation" style="top:18%; left:8%;">North · 42°11′</div>
+    <div class="annotation left" style="bottom:20%; right:10%;">Elevation 0.00m</div>
+  </section>
+
+  <!-- Scene 1: Workshop -->
+  <section class="scene" data-scene="1">
+    <div class="scene-inner">
+      <div class="scene-index">Scene 01 — The Workshop</div>
+      <h2 class="scene-title">Tools are arguments <em>with gravity.</em></h2>
+      <p class="scene-body">Every shape on the bench carries the weight of a small decision. A chisel that chose the grain. A clamp that chose patience. The workshop is less a room than a conversation conducted in steel and hardwood, passed hand to hand across decades.</p>
+      <div class="scene-meta">
+        <div><span>Bearing</span><strong>N 41° W</strong></div>
+        <div><span>Depth</span><strong>1.4m</strong></div>
+        <div><span>Objects</span><strong>47 catalogued</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scene 2: Network -->
+  <section class="scene scene--right" data-scene="2">
+    <div class="scene-inner">
+      <div class="scene-index">Scene 02 — The Network</div>
+      <h2 class="scene-title">Nothing moves alone, <em>not even light.</em></h2>
+      <p class="scene-body">Pull on one thread and the whole lattice answers. What looks like a constellation is mostly the space between — attention, trust, the patient wiring of one small room to the next until a city hums.</p>
+      <div class="scene-meta">
+        <div><span>Nodes</span><strong>214</strong></div>
+        <div><span>Edges</span><strong>1,036</strong></div>
+        <div><span>Latency</span><strong>12ms avg</strong></div>
+      </div>
+    </div>
+    <div class="annotation left" style="top:22%; right:42%;">Cluster β</div>
+  </section>
+
+  <!-- Scene 3: Gathering -->
+  <section class="scene" data-scene="3">
+    <div class="scene-inner">
+      <div class="scene-index">Scene 03 — The Gathering</div>
+      <h2 class="scene-title">A fire is just <em>a reason to sit closer.</em></h2>
+      <p class="scene-body">People organise around warmth the way rivers organise around stone. The circle is older than the language spoken inside it. Bring something to say or bring nothing at all — the geometry holds either way.</p>
+      <div class="scene-meta">
+        <div><span>Attendance</span><strong>32 souls</strong></div>
+        <div><span>Radius</span><strong>4.2m</strong></div>
+        <div><span>Temperature</span><strong>+6°C</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scene 4: Archive -->
+  <section class="scene scene--right" data-scene="4">
+    <div class="scene-inner">
+      <div class="scene-index">Scene 04 — The Archive</div>
+      <h2 class="scene-title">Memory is <em>a stack, not a line.</em></h2>
+      <p class="scene-body">Every layer is a room that somebody swore they'd remember. Press your hand to any plate in the stack and you can feel the whole column breathing — the oldest stories keeping the newest ones upright.</p>
+      <div class="scene-meta">
+        <div><span>Volumes</span><strong>1,284</strong></div>
+        <div><span>Oldest</span><strong>Anno 1611</strong></div>
+        <div><span>Access</span><strong>Open</strong></div>
+      </div>
+    </div>
+    <div class="annotation" style="bottom:24%; left:6%;">Shelf D — Row 12</div>
+  </section>
+
+  <!-- Scene 5: Horizon -->
+  <section class="scene scene--center" data-scene="5">
+    <div class="scene-inner">
+      <div class="scene-index">Scene 05 — Horizon</div>
+      <h2 class="scene-title">You're standing <em>where the map ends.</em></h2>
+      <p class="scene-body">From here the terrain looks small enough to hold, which is the first honest lie cartography ever told. Keep walking. The map is a promise, not a boundary.</p>
+      <div class="colophon">
+        <span>Atlas / Vol. 01 / 2026</span>
+        <span>End of transmission ◆</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ═══════════════════════════════════════════════════════
+   SPATIAL SCROLL ENGINE
+   ─────────────────────────────────────────────────────
+   Scroll progress (0→1) is the master clock. Everything
+   downstream — camera position, scene fog, prop animation,
+   DOM fades — reads from the same number.
+   ═══════════════════════════════════════════════════════ */
+
+const canvas = document.getElementById('scene-canvas');
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  alpha: true
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0); // transparent — let paper show through
+
+const scene = new THREE.Scene();
+const INK = 0x0e1a2b;
+const EMBER = 0xd8521e;
+const SAGE = 0x6b8f71;
+const MIST = 0xa8b4bf;
+
+scene.fog = new THREE.Fog(0xf3ede3, 8, 40);
+
+const camera = new THREE.PerspectiveCamera(
+  42, window.innerWidth / window.innerHeight, 0.1, 200
+);
+
+/* ─── Lighting (soft, like an overcast window) ─── */
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffe8d0, 0.8);
+key.position.set(4, 6, 3);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xd8521e, 0.3);
+rim.position.set(-3, 2, -4);
+scene.add(rim);
+
+/* ═══════════════════════════════════════════════════════
+   CAMERA PATH — a CatmullRom curve through 6 waypoints.
+   Each waypoint sits near its scene's "content" in 3D
+   space, with a look-at target slightly offset so the
+   props sweep across frame rather than staying centered.
+   ═══════════════════════════════════════════════════════ */
+
+const waypoints = [
+  new THREE.Vector3( 0,  1,  9),   // 0: Overture — wide, centered
+  new THREE.Vector3(-4,  0,  2),   // 1: Workshop — angle in from left
+  new THREE.Vector3( 5,  1, -4),   // 2: Network — swing right
+  new THREE.Vector3(-2, -1, -9),   // 3: Gathering — drop low
+  new THREE.Vector3( 4,  2,-14),   // 4: Archive — rise and continue
+  new THREE.Vector3( 0,  5,-22),   // 5: Horizon — pull back high
+];
+
+const lookTargets = [
+  new THREE.Vector3( 0,  0,  0),
+  new THREE.Vector3(-2,  0, -1),
+  new THREE.Vector3( 2,  0, -5),
+  new THREE.Vector3(-1, -1,-10),
+  new THREE.Vector3( 2,  1,-16),
+  new THREE.Vector3( 0,  0,-24),
+];
+
+const cameraCurve = new THREE.CatmullRomCurve3(waypoints, false, 'catmullrom', 0.4);
+const lookCurve   = new THREE.CatmullRomCurve3(lookTargets, false, 'catmullrom', 0.4);
+
+/* ═══════════════════════════════════════════════════════
+   PROPS — each scene has its own cluster of geometry,
+   positioned in world space near its waypoint.
+   Stored in groups so we can animate/cull them per-scene.
+   ═══════════════════════════════════════════════════════ */
+
+const propGroups = [];
+
+/* ─── Scene 0: Overture — a floating landmass ─── */
+{
+  const g = new THREE.Group();
+
+  // Central island disc
+  const disc = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.6, 2.2, 0.4, 32, 1),
+    new THREE.MeshStandardMaterial({ color: INK, flatShading: true, roughness: 0.9 })
+  );
+  disc.position.set(0, 0, 0);
+  g.add(disc);
+
+  // Monolith on top
+  const mono = new THREE.Mesh(
+    new THREE.BoxGeometry(0.35, 1.2, 0.35),
+    new THREE.MeshStandardMaterial({ color: EMBER, roughness: 0.6 })
+  );
+  mono.position.set(0.3, 0.8, 0.1);
+  g.add(mono);
+
+  // Orbiting rings (wire)
+  for (let i = 0; i < 2; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.8 + i * 0.5, 0.01, 8, 64),
+      new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.3 })
+    );
+    ring.rotation.x = Math.PI / 2 + i * 0.3;
+    ring.userData.spin = 0.0006 + i * 0.0003;
+    g.add(ring);
+  }
+
+  // Floating specks
+  for (let i = 0; i < 40; i++) {
+    const s = new THREE.Mesh(
+      new THREE.SphereGeometry(0.03, 6, 6),
+      new THREE.MeshBasicMaterial({ color: INK })
+    );
+    const r = 3 + Math.random() * 3;
+    const a = Math.random() * Math.PI * 2;
+    s.position.set(Math.cos(a) * r, (Math.random() - 0.5) * 3, Math.sin(a) * r);
+    s.userData.baseY = s.position.y;
+    s.userData.phase = Math.random() * Math.PI * 2;
+    g.add(s);
+  }
+
+  g.position.copy(lookTargets[0]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ─── Scene 1: Workshop — orbiting geometric tools ─── */
+{
+  const g = new THREE.Group();
+  const tools = [
+    new THREE.BoxGeometry(0.4, 0.08, 0.08),      // rule
+    new THREE.ConeGeometry(0.12, 0.5, 4),        // chisel
+    new THREE.TorusGeometry(0.18, 0.04, 8, 24),  // clamp
+    new THREE.CylinderGeometry(0.04, 0.04, 0.6, 8), // dowel
+    new THREE.OctahedronGeometry(0.18),          // crystal
+    new THREE.TetrahedronGeometry(0.2),          // plane
+  ];
+  tools.forEach((geo, i) => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: i === 2 ? EMBER : INK,
+      roughness: 0.7,
+      flatShading: true
+    });
+    const m = new THREE.Mesh(geo, mat);
+    const angle = (i / tools.length) * Math.PI * 2;
+    m.position.set(Math.cos(angle) * 1.4, Math.sin(i * 0.7) * 0.5, Math.sin(angle) * 1.4);
+    m.userData.orbit = { radius: 1.4, angle: angle, speed: 0.0008, yBase: m.position.y };
+    g.add(m);
+  });
+
+  // Center object — the workbench plate
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.05, 0.9),
+    new THREE.MeshStandardMaterial({ color: INK, roughness: 0.95 })
+  );
+  g.add(plate);
+
+  g.position.copy(lookTargets[1]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ─── Scene 2: Network — node graph ─── */
+{
+  const g = new THREE.Group();
+  const nodes = [];
+  const nodeCount = 18;
+  for (let i = 0; i < nodeCount; i++) {
+    const n = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 12, 12),
+      new THREE.MeshStandardMaterial({
+        color: i === 0 ? EMBER : INK,
+        emissive: i === 0 ? EMBER : 0x000000,
+        emissiveIntensity: i === 0 ? 0.3 : 0
+      })
+    );
+    const r = 1 + Math.random() * 1.8;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    n.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.sin(phi) * Math.sin(theta) * 0.5,
+      r * Math.cos(phi)
+    );
+    n.userData.basePos = n.position.clone();
+    n.userData.phase = Math.random() * Math.PI * 2;
+    g.add(n);
+    nodes.push(n);
+  }
+
+  // Connect each node to nearest 2-3 neighbors
+  const edgeMat = new THREE.LineBasicMaterial({ color: INK, transparent: true, opacity: 0.18 });
+  for (let i = 0; i < nodes.length; i++) {
+    const dists = nodes.map((n, j) => ({ j, d: i === j ? Infinity : nodes[i].position.distanceTo(n.position) }));
+    dists.sort((a, b) => a.d - b.d);
+    const picks = dists.slice(0, 2);
+    picks.forEach(({ j }) => {
+      if (j > i) {
+        const geo = new THREE.BufferGeometry().setFromPoints([nodes[i].position, nodes[j].position]);
+        g.add(new THREE.Line(geo, edgeMat));
+      }
+    });
+  }
+
+  g.position.copy(lookTargets[2]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ─── Scene 3: Gathering — cluster of figures around a glow ─── */
+{
+  const g = new THREE.Group();
+
+  // Central ember glow
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.25, 16, 16),
+    new THREE.MeshStandardMaterial({
+      color: EMBER, emissive: EMBER, emissiveIntensity: 1.2, roughness: 0.3
+    })
+  );
+  glow.position.y = 0.2;
+  g.add(glow);
+
+  const pointLight = new THREE.PointLight(EMBER, 2, 5);
+  pointLight.position.set(0, 0.3, 0);
+  g.add(pointLight);
+
+  // Figures — elongated capsules standing in a circle
+  const figureCount = 9;
+  for (let i = 0; i < figureCount; i++) {
+    const fig = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.12, 0.6, 8),
+      new THREE.MeshStandardMaterial({ color: INK, roughness: 0.8 })
+    );
+    body.position.y = 0.3;
+    fig.add(body);
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09, 12, 12),
+      new THREE.MeshStandardMaterial({ color: INK, roughness: 0.8 })
+    );
+    head.position.y = 0.7;
+    fig.add(head);
+
+    const angle = (i / figureCount) * Math.PI * 2;
+    const radius = 1.3 + Math.sin(i * 2) * 0.15;
+    fig.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+    fig.lookAt(0, 0.3, 0);
+    fig.userData.baseY = 0;
+    fig.userData.phase = i;
+    g.add(fig);
+  }
+
+  // Ground disc
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(2.2, 32),
+    new THREE.MeshStandardMaterial({ color: 0xece4d6, roughness: 1, transparent: true, opacity: 0.6 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  g.add(ground);
+
+  g.position.copy(lookTargets[3]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ─── Scene 4: Archive — stacked plates receding ─── */
+{
+  const g = new THREE.Group();
+  const plateCount = 14;
+  for (let i = 0; i < plateCount; i++) {
+    const w = 1.6 - i * 0.04;
+    const d = 1.1 - i * 0.03;
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 0.04, d),
+      new THREE.MeshStandardMaterial({
+        color: i % 3 === 0 ? EMBER : INK,
+        roughness: 0.85
+      })
+    );
+    plate.position.set(
+      Math.sin(i * 0.5) * 0.08,
+      i * 0.15,
+      Math.cos(i * 0.5) * 0.08
+    );
+    plate.rotation.y = Math.sin(i * 0.7) * 0.06;
+    plate.userData.baseRotY = plate.rotation.y;
+    plate.userData.index = i;
+    g.add(plate);
+  }
+
+  g.position.copy(lookTargets[4]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ─── Scene 5: Horizon — a low land plane + distant markers ─── */
+{
+  const g = new THREE.Group();
+
+  // Land plane
+  const land = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 40, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0xece4d6, roughness: 1 })
+  );
+  land.rotation.x = -Math.PI / 2;
+  land.position.y = -2;
+  g.add(land);
+
+  // Distant pillars
+  for (let i = 0; i < 12; i++) {
+    const p = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.15, 0.5 + Math.random() * 1.2, 6),
+      new THREE.MeshStandardMaterial({ color: INK, roughness: 0.8 })
+    );
+    const angle = Math.random() * Math.PI * 2;
+    const r = 4 + Math.random() * 8;
+    p.position.set(Math.cos(angle) * r, -1.5, Math.sin(angle) * r);
+    g.add(p);
+  }
+
+  // Sun disc
+  const sun = new THREE.Mesh(
+    new THREE.CircleGeometry(0.8, 32),
+    new THREE.MeshBasicMaterial({ color: EMBER, transparent: true, opacity: 0.85 })
+  );
+  sun.position.set(0, 1.5, -8);
+  g.add(sun);
+
+  g.position.copy(lookTargets[5]);
+  scene.add(g);
+  propGroups.push(g);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SCROLL → PROGRESS → CAMERA
+   ═══════════════════════════════════════════════════════ */
+
+let targetProgress = 0;
+let currentProgress = 0;
+
+function updateScrollProgress() {
+  const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+  targetProgress = Math.max(0, Math.min(1, window.scrollY / maxScroll));
+}
+window.addEventListener('scroll', updateScrollProgress, { passive: true });
+updateScrollProgress();
+
+/* ─── DOM scene activation ─── */
+const sceneEls = document.querySelectorAll('.scene');
+const railDots = document.querySelectorAll('.rail-dot');
+const cue = document.getElementById('cue');
+
+const sceneObserver = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    const idx = parseInt(e.target.dataset.scene);
+    if (e.isIntersecting && e.intersectionRatio > 0.4) {
+      e.target.classList.add('in-view');
+      railDots.forEach((d, i) => d.classList.toggle('active', i === idx));
+    }
+  });
+}, { threshold: [0.4, 0.6] });
+
+sceneEls.forEach(s => sceneObserver.observe(s));
+
+window.addEventListener('scroll', () => {
+  cue.classList.toggle('hidden', window.scrollY > 80);
+}, { passive: true });
+
+/* ═══════════════════════════════════════════════════════
+   ANIMATION LOOP
+   ═══════════════════════════════════════════════════════ */
+
+const clock = new THREE.Clock();
+const tmpLook = new THREE.Vector3();
+
+function tick() {
+  const t = clock.getElapsedTime();
+
+  // Smooth scroll progress (lerp — NOT jacking)
+  currentProgress += (targetProgress - currentProgress) * 0.08;
+
+  // Camera follows curve
+  cameraCurve.getPointAt(currentProgress, camera.position);
+  lookCurve.getPointAt(currentProgress, tmpLook);
+  camera.lookAt(tmpLook);
+
+  // Gentle camera breathing — subtle parallax even when still
+  camera.position.y += Math.sin(t * 0.4) * 0.03;
+
+  /* ─── Prop animations ─── */
+
+  // Scene 0 — rings spin, specks float
+  propGroups[0].children.forEach(c => {
+    if (c.userData.spin) c.rotation.z += c.userData.spin;
+    if (c.userData.phase !== undefined) {
+      c.position.y = c.userData.baseY + Math.sin(t * 0.8 + c.userData.phase) * 0.15;
+    }
+  });
+
+  // Scene 1 — tools orbit and bob
+  propGroups[1].children.forEach(c => {
+    if (c.userData.orbit) {
+      const o = c.userData.orbit;
+      o.angle += o.speed;
+      c.position.x = Math.cos(o.angle) * o.radius;
+      c.position.z = Math.sin(o.angle) * o.radius;
+      c.position.y = o.yBase + Math.sin(t + o.angle * 2) * 0.08;
+      c.rotation.x += 0.002;
+      c.rotation.y += 0.003;
+    }
+  });
+
+  // Scene 2 — nodes pulse
+  propGroups[2].children.forEach(c => {
+    if (c.userData.basePos) {
+      const pulse = Math.sin(t * 1.2 + c.userData.phase) * 0.05;
+      c.position.copy(c.userData.basePos).multiplyScalar(1 + pulse);
+    }
+  });
+
+  // Scene 3 — figures sway slightly
+  propGroups[3].children.forEach(c => {
+    if (c.userData.phase !== undefined) {
+      c.rotation.y += Math.sin(t * 0.6 + c.userData.phase) * 0.0008;
+      c.position.y = c.userData.baseY + Math.abs(Math.sin(t * 0.5 + c.userData.phase)) * 0.02;
+    }
+  });
+
+  // Scene 4 — archive plates tilt
+  propGroups[4].children.forEach(c => {
+    if (c.userData.baseRotY !== undefined) {
+      c.rotation.y = c.userData.baseRotY + Math.sin(t * 0.3 + c.userData.index * 0.5) * 0.03;
+    }
+  });
+
+  // Scene 5 — sun pulse (already static, gentle breath)
+  propGroups[5].children.forEach(c => {
+    if (c.geometry && c.geometry.type === 'CircleGeometry' && c.material.color.getHex() === EMBER) {
+      c.scale.setScalar(1 + Math.sin(t * 0.5) * 0.02);
+    }
+  });
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+/* ─── Resize ─── */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+</script>
+</body>
+</html>
