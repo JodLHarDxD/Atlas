@@ -33,13 +33,19 @@ Fonts: Fraunces · JetBrains Mono (Google Fonts)
 
 No build step. Open `Atlas spatial journal.html` directly in a browser.
 
+### Netlify
+
+This repo includes a `netlify.toml` and an `index.html` redirect so Netlify serves the project from the root URL.
+
 ---
 
 ## Structure
 
 ```
-strytlin/
-└── Atlas spatial journal.html   ← everything in one file
+Atlas/
+├── Atlas spatial journal.html   ← main experience
+├── index.html                   ← redirect entry for static hosts (Netlify)
+└── netlify.toml                 ← Netlify publish config
 ```
 
 ---
